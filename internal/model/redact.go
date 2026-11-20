@@ -11,17 +11,19 @@ const redacted = "REDACTED"
 const credentialName = `[A-Za-z0-9_-]*(?:authorization|bearer|token|secret|passw|api[-_]?key|cookie|credential|private[-_]?key)[A-Za-z0-9_-]*`
 
 var (
-	// urlPattern stops at quotes, commas and brackets, so URLs inside a JSON
-	// argument are matched one by one.
-	urlPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>,{}\[\]]+`)
-	// assignmentPattern is a credential name and its value anywhere in an
-	// argument: "Authorization: Bearer x", "api_key=x", "--token=x" and the
-	// properties of a JSON object.
-	assignmentPattern = regexp.MustCompile(`(?i)(` + credentialName + `)(["']?\s*[:=]\s*)((?:bearer|basic)\s+)?("[^"]*"|'[^']*'|[^\s,;&}\]"']+)`)
+	// urlPattern runs to the next quote, so URLs inside a JSON argument are
+	// matched one by one while brackets and commas stay part of them.
+	urlPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
+	// assignmentPattern is a credential name followed by ":" or "=", as in
+	// "Authorization: Bearer x", "api_key=x", "--token=x" or a JSON property.
+	// Everything after it, to the end of the argument, is its value.
+	assignmentPattern = regexp.MustCompile(`(?is)(` + credentialName + `)(["']?\s*[:=]\s*)(.*)$`)
+	// leadingAssignment is an assignment that starts the argument, so even a
+	// value with spaces is one value rather than a script.
+	leadingAssignment = regexp.MustCompile(`(?is)^[^A-Za-z0-9_-]*-{0,2}` + credentialName + `["']?\s*[:=]`)
 	// pendingPattern is a credential name whose value is the next argument:
 	// a flag such as --token, or a name ending in ":" or "=".
 	pendingPattern = regexp.MustCompile(`(?i)(?:^--?` + credentialName + `|` + credentialName + `["']?\s*[:=])$`)
-	scheme         = regexp.MustCompile(`(?i)^(?:bearer|basic)$`)
 	braced         = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
 	bare           = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*$`)
 )
@@ -47,12 +49,12 @@ func RedactURL(raw string) string {
 }
 
 // Redact removes what may be a credential from a command line before it is
-// reported. The line is split into arguments as a POSIX shell would, and in
-// each argument the user information and query of URLs, the value after a
-// credential name ("Authorization: Bearer x", "api_key=x", a JSON property)
-// and the argument after a credential flag ("--token x") are replaced. A
-// quoted script, as in sh -c '...', is redacted the same way. A variable
-// reference holds no value and is kept.
+// reported. The line is split into arguments as a POSIX shell would. In each
+// argument, the user information and query of URLs are replaced, and so is
+// everything after a credential name ("Authorization: Bearer x", "api_key=x",
+// a JSON property); the argument after a credential flag ("--token x") is
+// replaced whole. A quoted script, as in sh -c '...', is redacted the same
+// way. A variable reference holds no value and is kept.
 func Redact(line string) string {
 	var b strings.Builder
 	last := 0
@@ -63,23 +65,19 @@ func Redact(line string) string {
 		wasPending := pending
 		pending = pendingPattern.MatchString(value)
 		switch {
-		case wasPending && scheme.MatchString(value):
-			pending = true // the value follows "Bearer"
 		case wasPending:
 			if !arg.reference(value) {
 				value = redacted
 			}
-		case strings.ContainsAny(value, " \t\n"):
+		case strings.ContainsAny(value, " \t\n") && !leadingAssignment.MatchString(value):
 			value = Redact(value)
 		default:
-			value = assignmentPattern.ReplaceAllStringFunc(value, func(match string) string {
-				m := assignmentPattern.FindStringSubmatch(match)
-				if arg.reference(strings.Trim(m[4], `"'`)) {
-					return match
-				}
-				return m[1] + m[2] + m[3] + redacted
-			})
 			value = urlPattern.ReplaceAllStringFunc(value, RedactURL)
+			if m := assignmentPattern.FindStringSubmatchIndex(value); m != nil {
+				if rest := value[m[6]:]; rest != "" && !arg.reference(rest) {
+					value = value[:m[6]] + redacted
+				}
+			}
 		}
 		if value == arg.value {
 			continue
@@ -95,8 +93,8 @@ func Redact(line string) string {
 type argument struct {
 	value      string
 	start, end int
-	// literal is set when part of the argument was single-quoted, so the
-	// shell expands no variable in it.
+	// literal is set when part of the argument was single-quoted or escaped,
+	// so a $ in it may not be expanded by the shell.
 	literal bool
 }
 
@@ -131,6 +129,7 @@ func splitArgs(line string) []argument {
 				i++ // line continuation
 			case c == '\\' && i+1 < len(line) && strings.IndexByte("\"\\$`", line[i+1]) >= 0:
 				i++
+				literal = true
 				current.WriteByte(line[i])
 			default:
 				current.WriteByte(c)
@@ -157,6 +156,7 @@ func splitArgs(line string) []argument {
 			quoteChar = c
 		case c == '\\' && i+1 < len(line):
 			i++
+			literal = true
 			current.WriteByte(line[i])
 		default:
 			current.WriteByte(c)
