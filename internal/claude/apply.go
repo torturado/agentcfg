@@ -22,7 +22,7 @@ import (
 //
 // A declared server enabled in ~/.mcp.json is corrected there, and one enabled
 // in managed settings with the declared target is left there; either way it is
-// not duplicated in ~/.claude.json. Within a server entry only the keys the
+// not added to ~/.claude.json, though an entry already there is corrected. Within a server entry only the keys the
 // spec describes are written, so options such as a timeout are kept.
 func Plan(home string, desired spec.Spec, inv model.Inventory) ([]model.FileEdit, error) {
 	paths := PathsFor(home)
@@ -38,10 +38,14 @@ func Plan(home string, desired spec.Spec, inv model.Inventory) ([]model.FileEdit
 		if err != nil {
 			return nil, err
 		}
-		switch {
-		case inMCPJSON(name):
+		elsewhere := inMCPJSON(name) || providedByManaged(name, server, inv)
+		if inMCPJSON(name) {
 			mcpJSON[name] = entry
-		case !providedByManaged(name, server, inv):
+		}
+		// The user scope also applies outside the home directory, where
+		// ~/.mcp.json does not load, so an existing user entry is corrected
+		// rather than removed.
+		if !elsewhere || enabledIn(inv, name, "user") {
 			userScope[name] = entry
 		}
 	}

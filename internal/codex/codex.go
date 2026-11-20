@@ -142,6 +142,10 @@ func readConfig(path, scope string, inv *model.Inventory) error {
 			add(model.EnvField, variable, base+".env."+variable, value, value != "")
 		}
 		for _, variable := range entry.EnvVars {
+			// Codex gives an explicit env value precedence over a passthrough.
+			if _, set := entry.Env[variable]; set {
+				continue
+			}
 			add(model.EnvField, variable, base+".env_vars", "${"+variable+"}", false, variable)
 		}
 		inv.MCPServers = append(inv.MCPServers, server)

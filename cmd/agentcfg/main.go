@@ -249,6 +249,9 @@ func runSecrets(args []string, home string, stdin io.Reader, stdout io.Writer) (
 		}
 		_, statErr := os.Stat(secretsPath)
 		missing := errors.Is(statErr, fs.ErrNotExist)
+		if statErr != nil && !missing {
+			return 0, statErr
+		}
 		var values secrets.Values
 		switch {
 		case missing && command == "set" && *create:
@@ -272,7 +275,7 @@ func runSecrets(args []string, home string, stdin io.Reader, stdout io.Writer) (
 			delete(values, name)
 		}
 		recipients := file.Recipients()
-		if err := secrets.Save(secretsPath, values, recipients); err != nil {
+		if err := secrets.Save(secretsPath, values, recipients, missing); err != nil {
 			return 0, err
 		}
 		fmt.Fprintf(stdout, "%s encrypted to %d machines. Run agentcfg secrets sync on each one.\n", shorten(secretsPath, home), len(recipients))

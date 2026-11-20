@@ -110,8 +110,10 @@ func Load(secretsPath, identityPath string) (Values, error) {
 	return Parse(plain)
 }
 
-// Save encrypts values to every recipient and replaces the secrets file.
-func Save(secretsPath string, values Values, recipients []string) error {
+// Save encrypts values to every recipient and replaces the secrets file. With
+// create, the file must not exist: if another machine's copy arrives first,
+// Save fails with fs.ErrExist instead of replacing it.
+func Save(secretsPath string, values Values, recipients []string, create bool) error {
 	if len(recipients) == 0 {
 		return fmt.Errorf("no age_recipient in the spec's [hosts]; nobody could decrypt the secrets")
 	}
@@ -133,6 +135,9 @@ func Save(secretsPath string, values Values, recipients []string) error {
 	}
 	if err := writer.Close(); err != nil {
 		return err
+	}
+	if create {
+		return files.Create(secretsPath, buf.Bytes(), 0o600)
 	}
 	return files.Atomic(secretsPath, buf.Bytes(), 0o600)
 }

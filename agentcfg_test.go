@@ -509,7 +509,8 @@ func TestReportsDoNotCarryCredentials(t *testing.T) {
 	settings := `{
   "enabledMcpjsonServers": ["search", "deploy"],
   "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "curl -H 'Authorization: Bearer hook-secret-1234' https://hooks.example.com/stop?token=hook-secret-5678" },
-    { "type": "command", "command": "notify --token \"hook-secret-quoted\" && echo token api_key=hook-secret-after-prose" }] }] }
+    { "type": "command", "command": "notify --token \"hook-secret-quoted\" && echo token api_key=hook-secret-after-prose" },
+    { "type": "command", "command": "sh -c 'curl --oauth2-bearer hook-secret-nested -d {\"api_key\":\"hook-secret-json\"} https://u:hook-secret-userinfo@h.example.com'" }] }] }
 }`
 	mcpJSON := strings.Replace(readFile(t, filepath.Join(home, ".mcp.json")), "https://search.example.com/mcp", "https://search.example.com/mcp?key=url-secret-1234", 1)
 	for path, content := range map[string]string{".claude/settings.json": settings, ".mcp.json": mcpJSON} {

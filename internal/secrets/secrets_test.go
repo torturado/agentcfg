@@ -28,8 +28,12 @@ func TestEveryRecipientDecryptsAndShellsReadTheEnvironmentFile(t *testing.T) {
 
 	secretsPath := filepath.Join(dir, "secrets.age")
 	want := secrets.Values{"DEPLOY_TOKEN": "tok_a;b&c|d>e#f", "SEARCH_API_KEY": "key-123"}
-	if err := secrets.Save(secretsPath, want, recipients); err != nil {
+	if err := secrets.Save(secretsPath, want, recipients, true); err != nil {
 		t.Fatal(err)
+	}
+	// Another machine's copy can arrive while a first secret is being created.
+	if err := secrets.Save(secretsPath, secrets.Values{"OTHER": "x"}, recipients, true); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("creating over an existing secrets file: %v", err)
 	}
 	encrypted, _ := os.ReadFile(secretsPath)
 	if string(encrypted) == string(want.Format()) {

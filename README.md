@@ -113,7 +113,8 @@ query values, the value after a credential name (`Authorization: …`, `api_key=
 | `~/.codex/hooks.json` | Hooks not in the spec are removed. |
 
 A declared server enabled in `~/.mcp.json` is corrected there, and one enabled with the same
-target in managed settings is left there; neither is duplicated in `~/.claude.json`. Within a
+target in managed settings is left there; neither is added to `~/.claude.json`, though an entry
+already there is corrected too, since the user scope also applies outside the home directory. Within a
 server, only the keys the spec describes are written (URL, command, arguments, headers,
 environment), so options such as a Codex `startup_timeout_sec`, and comments in its table, are
 kept. An undeclared Codex server with `enabled = false` is left alone, as `check` does. Hooks are only removed, never added, because

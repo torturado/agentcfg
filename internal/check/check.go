@@ -54,7 +54,7 @@ func Run(desired spec.Spec, inv model.Inventory) []Finding {
 			}
 			for _, server := range found {
 				if want.URL != "" && server.URL != want.URL {
-					findings = append(findings, Finding{Error, agent, "server-mismatch", server.Source, server.Name, fmt.Sprintf("url is %q, spec says %q", model.Redact(server.URL), model.Redact(want.URL))})
+					findings = append(findings, Finding{Error, agent, "server-mismatch", server.Source, server.Name, fmt.Sprintf("url is %q, spec says %q", model.RedactURL(server.URL), model.RedactURL(want.URL))})
 				}
 				if want.Command != "" && server.Command != want.Command {
 					findings = append(findings, Finding{Error, agent, "server-mismatch", server.Source, server.Name, fmt.Sprintf("command is %q, spec says %q", model.Redact(server.Command), model.Redact(want.Command))})
