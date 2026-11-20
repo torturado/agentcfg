@@ -513,7 +513,8 @@ func TestReportsDoNotCarryCredentials(t *testing.T) {
     { "type": "command", "command": "notify --token \"hook-secret-quoted\" && echo token api_key=hook-secret-after-prose" },
     { "type": "command", "command": "sh -c 'curl --oauth2-bearer hook-secret-nested -d {\"api_key\":\"hook-secret-json\"} https://u:hook-secret-userinfo@h.example.com'" },
     { "type": "command", "command": "notify --token '$hook-secret-dollar' --oauth2-bearer -hook-secret-dash -d '{\"model\":\"x\",\"api_key\":\"hook-secret-second\",\"u\":\"https://u:hook-secret-json-url@h.example.com/\"}' --password \\\nhook-secret-continued" },
-    { "type": "command", "command": "x --token \\$hook-secret-escaped --password Basic -d '{\"api_key\":\"a\\\"hook-secret-escaped-quote\"}' 'http://[::1]:80/x?a=1,hook-secret-comma&t=hook-secret-ipv6' --password=\"two hook-secret-words\"" }] }] }
+    { "type": "command", "command": "x --token \\$escaped_value --password Basic -d '{\"api_key\":\"a\\\"hook-secret-escaped-quote\"}' 'http://[::1]:80/x?a=1,hook-secret-comma&t=hook-secret-ipv6' --password=\"two hook-secret-words\"" },
+    { "type": "command", "command": "curl --header=\"Authorization: Bearer hook-secret-header\" -d '{\"kind\":\"x\",\"api_key\":\"abc\\\" hook-secret-after-space\"}' https://a.example/,https://u:hook-secret-list@b.example/" }] }] }
 }`
 	mcpJSON := strings.Replace(readFile(t, filepath.Join(home, ".mcp.json")), "https://search.example.com/mcp", "https://search.example.com/mcp?key=url-secret-1234", 1)
 	for path, content := range map[string]string{".claude/settings.json": settings, ".mcp.json": mcpJSON} {
@@ -535,7 +536,7 @@ func TestReportsDoNotCarryCredentials(t *testing.T) {
 	}
 	for _, value := range []any{report, plan} {
 		text := string(mustJSON(value))
-		if strings.Contains(text, "secret-") || strings.Contains(text, "Basic") {
+		if strings.Contains(text, "secret-") || strings.Contains(text, "Basic") || strings.Contains(text, "escaped_value") {
 			t.Errorf("credential in report:\n%s", text)
 		}
 	}

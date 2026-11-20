@@ -18,15 +18,22 @@ var (
 	// "Authorization: Bearer x", "api_key=x", "--token=x" or a JSON property.
 	// Everything after it, to the end of the argument, is its value.
 	assignmentPattern = regexp.MustCompile(`(?is)(` + credentialName + `)(["']?\s*[:=]\s*)(.*)$`)
-	// leadingAssignment is an assignment that starts the argument, so even a
-	// value with spaces is one value rather than a script.
-	leadingAssignment = regexp.MustCompile(`(?is)^[^A-Za-z0-9_-]*-{0,2}` + credentialName + `["']?\s*[:=]`)
 	// pendingPattern is a credential name whose value is the next argument:
 	// a flag such as --token, or a name ending in ":" or "=".
 	pendingPattern = regexp.MustCompile(`(?i)(?:^--?` + credentialName + `|` + credentialName + `["']?\s*[:=])$`)
 	braced         = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
 	bare           = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*$`)
 )
+
+// redactEmbeddedURL redacts a URL found inside an argument. A match that
+// holds a second URL, as in a comma-separated list, cannot be split reliably
+// and is replaced whole.
+func redactEmbeddedURL(match string) string {
+	if strings.Count(match, "://") > 1 {
+		return redacted
+	}
+	return RedactURL(match)
+}
 
 // RedactURL removes the user information and query values of a URL. A value
 // that does not parse as a URL is replaced whole.
@@ -51,10 +58,10 @@ func RedactURL(raw string) string {
 // Redact removes what may be a credential from a command line before it is
 // reported. The line is split into arguments as a POSIX shell would. In each
 // argument, the user information and query of URLs are replaced, and so is
-// everything after a credential name ("Authorization: Bearer x", "api_key=x",
-// a JSON property); the argument after a credential flag ("--token x") is
-// replaced whole. A quoted script, as in sh -c '...', is redacted the same
-// way. A variable reference holds no value and is kept.
+// everything after the first credential name ("Authorization: Bearer x",
+// "api_key=x", a JSON property), to the end of the argument; the argument
+// after a credential flag ("--token x") is replaced whole, including flags
+// inside a quoted script. A variable reference holds no value and is kept.
 func Redact(line string) string {
 	var b strings.Builder
 	last := 0
@@ -69,14 +76,17 @@ func Redact(line string) string {
 			if !arg.reference(value) {
 				value = redacted
 			}
-		case strings.ContainsAny(value, " \t\n") && !leadingAssignment.MatchString(value):
-			value = Redact(value)
 		default:
-			value = urlPattern.ReplaceAllStringFunc(value, RedactURL)
+			value = urlPattern.ReplaceAllStringFunc(value, redactEmbeddedURL)
 			if m := assignmentPattern.FindStringSubmatchIndex(value); m != nil {
 				if rest := value[m[6]:]; rest != "" && !arg.reference(rest) {
 					value = value[:m[6]] + redacted
 				}
+			}
+			// What remains of a quoted script, as in sh -c '...', can still
+			// hold a credential flag.
+			if strings.ContainsAny(value, " \t\n") {
+				value = Redact(value)
 			}
 		}
 		if value == arg.value {
