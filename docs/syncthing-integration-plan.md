@@ -165,8 +165,11 @@ changed since 2.1.5, so the packaged binary can take the database back.
     the error within 3 s.
 - **Pending:**
   - docker, on 2026-11-27 if the others have no incidents;
-  - the fleet view: tagging the nodes `tag:syncthing` and adding the grant to the tailnet policy,
-    then the authorization, `tailscaled`-stopped and fleet checks.
+  - the fleet view: tagging the six nodes `tag:syncthing` and casa also `tag:fleet-admin`, then
+    the `tailscaled`-stopped and fleet checks. The tailnet policy already has both tags'
+    owners and the grant from the threat model, and `agentcfgFleetEnabled` is on in the five
+    machines. Until the nodes are tagged, every listener answers 403 to casa and refuses
+    connections on the LAN address, which is the authorization check for an untagged node.
 
 ## Rules for keeping the fork cheap
 
