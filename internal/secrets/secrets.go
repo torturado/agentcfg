@@ -87,12 +87,11 @@ func Parse(data []byte) (Values, error) {
 }
 
 // Load decrypts the secrets file with the identity at identityPath. A missing
-// secrets file holds no values.
+// file is an error wrapping fs.ErrNotExist: on a machine the synced file has
+// not reached yet, treating it as empty would erase the environment or, on
+// save, replace the fleet's secrets with one value.
 func Load(secretsPath, identityPath string) (Values, error) {
 	encrypted, err := os.ReadFile(secretsPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return Values{}, nil
-	}
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,7 @@ type mcpServer struct {
 	Type    string            `json:"type"`
 	URL     string            `json:"url"`
 	Command string            `json:"command"`
+	Args    []string          `json:"args"`
 	Headers map[string]string `json:"headers"`
 	Env     map[string]string `json:"env"`
 }
@@ -311,7 +312,7 @@ func servers(entries map[string]mcpServer, scope, source, prefix string, enabled
 	for name, entry := range entries {
 		server := model.MCPServer{
 			Agent: model.Claude, Name: name, Scope: scope, Source: source,
-			URL: entry.URL, Command: entry.Command, Enabled: enabled == nil || enabled(name),
+			URL: entry.URL, Command: entry.Command, Args: entry.Args, Enabled: enabled == nil || enabled(name),
 		}
 		base := prefix + "." + name
 		for header, value := range entry.Headers {
@@ -328,7 +329,7 @@ func servers(entries map[string]mcpServer, scope, source, prefix string, enabled
 // field classifies a value without keeping it: a value with no ${VAR}
 // reference is written in the file.
 func field(kind model.FieldKind, name, path, value string) model.Field {
-	f := model.Field{Kind: kind, Name: name, Path: path}
+	f := model.Field{Kind: kind, Name: name, Path: path, Sum: model.ValueSum(value)}
 	matches := model.EnvRef.FindAllStringSubmatch(value, -1)
 	for _, match := range matches {
 		if !slices.Contains(pluginVariables, match[1]) {

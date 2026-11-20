@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ const usage = `usage:
   agentcfg check   [--spec path] [--host name] [--json]
   agentcfg apply   [--spec path] [--host name] [--json] [--write]
   agentcfg secrets keygen [--identity path]
-  agentcfg secrets set NAME [--spec path] [--identity path]   (value read from stdin)
+  agentcfg secrets set NAME [--spec path] [--identity path] [--create]   (value read from stdin)
   agentcfg secrets unset NAME [--spec path] [--identity path]
   agentcfg secrets rekey [--spec path] [--identity path]
   agentcfg secrets sync [--spec path] [--identity path] [--out path]`
@@ -198,6 +199,7 @@ func runSecrets(args []string, home string, stdin io.Reader, stdout io.Writer) (
 	}
 	f := newFlags("secrets "+command, home)
 	out := f.set.String("out", filepath.Join(xdgConfig(home), "environment.d", "agentcfg.conf"), "environment file written by sync")
+	create := f.set.Bool("create", false, "set: create the secrets file when it does not exist yet")
 	if err := f.set.Parse(args); err != nil {
 		return 0, err
 	}
@@ -235,6 +237,12 @@ func runSecrets(args []string, home string, stdin io.Reader, stdout io.Writer) (
 			return 0, fmt.Errorf("spec: %w", err)
 		}
 		values, err := secrets.Load(secretsPath, *f.identity)
+		if errors.Is(err, fs.ErrNotExist) && command == "set" && *create {
+			values, err = secrets.Values{}, nil
+		}
+		if errors.Is(err, fs.ErrNotExist) && command == "set" {
+			return 0, fmt.Errorf("%w; wait for it to sync, or pass --create for the fleet's first secret", err)
+		}
 		if err != nil {
 			return 0, err
 		}
