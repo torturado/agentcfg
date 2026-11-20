@@ -456,6 +456,7 @@ func TestApplyCorrectsServersWhereTheyAreAndKeepsTheirOptions(t *testing.T) {
 	// Approving all servers does not override an explicit rejection.
 	settings := `{ "enableAllProjectMcpServers": true, "disabledMcpjsonServers": ["unapproved"] }`
 	codex := strings.Replace(codexText(t, home), "[mcp_servers.search]\n", "[mcp_servers.search]\n# kept by hand\nstartup_timeout_sec = 30\n", 1)
+	codex = strings.Replace(codex, `env_http_headers = { "X-API-Key" = "SEARCH_API_KEY" }`, `env_http_headers = { "X-API-Key" = "SEARCH_API_KEY" } # unchanged, so kept`, 1)
 	for path, content := range map[string]string{".mcp.json": mcpJSON, ".claude/settings.json": settings, ".codex/config.toml": codex} {
 		if err := os.WriteFile(filepath.Join(home, path), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -487,7 +488,7 @@ func TestApplyCorrectsServersWhereTheyAreAndKeepsTheirOptions(t *testing.T) {
 	if state, _ := os.ReadFile(filepath.Join(home, ".claude.json")); strings.Contains(string(state), "search") {
 		t.Errorf("search duplicated in ~/.claude.json:\n%s", state)
 	}
-	if after := codexText(t, home); !strings.Contains(after, "# kept by hand\n") || !strings.Contains(after, "startup_timeout_sec = 30\n") {
+	if after := codexText(t, home); !strings.Contains(after, "# kept by hand\n") || !strings.Contains(after, "startup_timeout_sec = 30\n") || !strings.Contains(after, "# unchanged, so kept") {
 		t.Errorf("Codex server option or comment lost:\n%s", after)
 	}
 }
@@ -510,7 +511,8 @@ func TestReportsDoNotCarryCredentials(t *testing.T) {
   "enabledMcpjsonServers": ["search", "deploy"],
   "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "curl -H 'Authorization: Bearer hook-secret-1234' https://hooks.example.com/stop?token=hook-secret-5678" },
     { "type": "command", "command": "notify --token \"hook-secret-quoted\" && echo token api_key=hook-secret-after-prose" },
-    { "type": "command", "command": "sh -c 'curl --oauth2-bearer hook-secret-nested -d {\"api_key\":\"hook-secret-json\"} https://u:hook-secret-userinfo@h.example.com'" }] }] }
+    { "type": "command", "command": "sh -c 'curl --oauth2-bearer hook-secret-nested -d {\"api_key\":\"hook-secret-json\"} https://u:hook-secret-userinfo@h.example.com'" },
+    { "type": "command", "command": "notify --token '$hook-secret-dollar' --oauth2-bearer -hook-secret-dash -d '{\"model\":\"x\",\"api_key\":\"hook-secret-second\",\"u\":\"https://u:hook-secret-json-url@h.example.com/\"}' --password \\\nhook-secret-continued" }] }] }
 }`
 	mcpJSON := strings.Replace(readFile(t, filepath.Join(home, ".mcp.json")), "https://search.example.com/mcp", "https://search.example.com/mcp?key=url-secret-1234", 1)
 	for path, content := range map[string]string{".claude/settings.json": settings, ".mcp.json": mcpJSON} {

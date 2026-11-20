@@ -107,12 +107,25 @@ func planConfig(path string, desired spec.Spec, allowed func(string) bool) (*mod
 			return len(key) > 1 && key[0] == "mcp_servers" && slices.Contains(replace, key[1])
 		}, replacement.String())
 		for _, name := range update {
+			existing, wanted := current[name].(map[string]any), want[name].decoded.(map[string]any)
+			// An owned key that already has the spec's value keeps its line,
+			// and the comment on it.
+			unchanged := func(key string) bool {
+				value, found := existing[key]
+				return found && reflect.DeepEqual(value, wanted[key])
+			}
 			text = replaceTables(text, func(key []string) bool {
-				return len(key) == 3 && key[0] == "mcp_servers" && key[1] == name && slices.Contains(ownedKeys, key[2])
+				return len(key) == 3 && key[0] == "mcp_servers" && key[1] == name && slices.Contains(ownedKeys, key[2]) && !unchanged(key[2])
 			}, "")
-			text = updateTable(text, name, want[name].lines)
+			var lines strings.Builder
+			for _, line := range strings.SplitAfter(want[name].lines, "\n") {
+				if key, _, _ := strings.Cut(line, " = "); line != "" && !unchanged(key) {
+					lines.WriteString(line)
+				}
+			}
+			text = updateTable(text, name, lines.String(), unchanged)
 			merged := map[string]any{}
-			for key, value := range current[name].(map[string]any) {
+			for key, value := range existing {
 				if !slices.Contains(ownedKeys, key) {
 					merged[key] = value
 				}
@@ -317,18 +330,26 @@ func owned(entry map[string]any) map[string]any {
 var keyLine = regexp.MustCompile(`^\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)\s*[.=]`)
 
 // updateTable puts lines right after the [mcp_servers.<name>] header and
-// drops the owned keys the table had, including values that span lines. Its
-// other keys and its comments stay where they are.
-func updateTable(text, name, lines string) string {
+// drops the owned keys the table had, including values that span lines,
+// except those keep accepts. Its other keys and its comments stay where they
+// are.
+func updateTable(text, name, lines string, keep func(key string) bool) string {
 	var out []string
 	inTable := false
-	open := 0
+	// dropping and keeping count the brackets still open in a multi-line
+	// value being dropped or kept.
+	dropping, keeping := 0, 0
 	for _, line := range strings.SplitAfter(text, "\n") {
 		if line == "" {
 			continue
 		}
-		if open > 0 {
-			open += bracketDepth(line)
+		if dropping > 0 {
+			dropping += bracketDepth(line)
+			continue
+		}
+		if keeping > 0 {
+			keeping += bracketDepth(line)
+			out = append(out, line)
 			continue
 		}
 		if m := tableHeader.FindStringSubmatch(line); m != nil {
@@ -341,7 +362,12 @@ func updateTable(text, name, lines string) string {
 			continue
 		}
 		if m := keyLine.FindStringSubmatch(line); inTable && m != nil && slices.Contains(ownedKeys, splitKey(m[1])[0]) {
-			open = max(bracketDepth(line), 0)
+			if keep(splitKey(m[1])[0]) {
+				keeping = max(bracketDepth(line), 0)
+				out = append(out, line)
+			} else {
+				dropping = max(bracketDepth(line), 0)
+			}
 			continue
 		}
 		out = append(out, line)

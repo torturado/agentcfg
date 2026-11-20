@@ -11,21 +11,27 @@ const redacted = "REDACTED"
 const credentialName = `[A-Za-z0-9_-]*(?:authorization|bearer|token|secret|passw|api[-_]?key|cookie|credential|private[-_]?key)[A-Za-z0-9_-]*`
 
 var (
-	urlPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://\S+`)
-	// assignmentPattern is a credential name and its value in one argument:
-	// "Authorization: Bearer x", "api_key=x", "--token=x".
-	// A JSON form such as {"api_key":"x"} keeps its leading punctuation.
-	assignmentPattern = regexp.MustCompile(`(?is)^([^A-Za-z0-9_-]*-{0,2}` + credentialName + `)(\s*[:=]\s*)(.*)$`)
-	// flagPattern is a credential flag whose value is the next argument.
-	flagPattern = regexp.MustCompile(`(?i)^--?` + credentialName + `$`)
+	// urlPattern stops at quotes, commas and brackets, so URLs inside a JSON
+	// argument are matched one by one.
+	urlPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>,{}\[\]]+`)
+	// assignmentPattern is a credential name and its value anywhere in an
+	// argument: "Authorization: Bearer x", "api_key=x", "--token=x" and the
+	// properties of a JSON object.
+	assignmentPattern = regexp.MustCompile(`(?i)(` + credentialName + `)(["']?\s*[:=]\s*)((?:bearer|basic)\s+)?("[^"]*"|'[^']*'|[^\s,;&}\]"']+)`)
+	// pendingPattern is a credential name whose value is the next argument:
+	// a flag such as --token, or a name ending in ":" or "=".
+	pendingPattern = regexp.MustCompile(`(?i)(?:^--?` + credentialName + `|` + credentialName + `["']?\s*[:=])$`)
+	scheme         = regexp.MustCompile(`(?i)^(?:bearer|basic)$`)
+	braced         = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+	bare           = regexp.MustCompile(`^\$[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// RedactURL removes the user information and query values of a URL.
+// RedactURL removes the user information and query values of a URL. A value
+// that does not parse as a URL is replaced whole.
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		scheme, _, _ := strings.Cut(raw, "://")
-		return scheme + "://" + redacted
+		return redacted
 	}
 	if u.User != nil {
 		u.User = url.User(redacted)
@@ -41,28 +47,40 @@ func RedactURL(raw string) string {
 }
 
 // Redact removes what may be a credential from a command line before it is
-// reported. The line is split into arguments as a POSIX shell would, and an
-// argument is replaced when it holds a URL with user information or a query,
-// a credential name with its value ("Authorization: Bearer x", "api_key=x"),
-// or follows a credential flag ("--token x"); a quoted script is redacted the
-// same way. ${VAR} and $VAR references are kept, since they hold no value.
+// reported. The line is split into arguments as a POSIX shell would, and in
+// each argument the user information and query of URLs, the value after a
+// credential name ("Authorization: Bearer x", "api_key=x", a JSON property)
+// and the argument after a credential flag ("--token x") are replaced. A
+// quoted script, as in sh -c '...', is redacted the same way. A variable
+// reference holds no value and is kept.
 func Redact(line string) string {
-	args := splitArgs(line)
 	var b strings.Builder
 	last := 0
-	for i, arg := range args {
+	// pending is set while the next argument is a credential's value.
+	pending := false
+	for _, arg := range splitArgs(line) {
 		value := arg.value
-		if m := assignmentPattern.FindStringSubmatch(value); m != nil {
-			if m[3] != "" && !isReference(m[3]) {
-				value = m[1] + m[2] + redacted
+		wasPending := pending
+		pending = pendingPattern.MatchString(value)
+		switch {
+		case wasPending && scheme.MatchString(value):
+			pending = true // the value follows "Bearer"
+		case wasPending:
+			if !arg.reference(value) {
+				value = redacted
 			}
-		} else if i > 0 && args[i-1].credentialFlag() && !isReference(value) && !(arg.bare && strings.HasPrefix(value, "-")) {
-			value = redacted
-		} else if strings.ContainsAny(value, " \t\n") {
-			// A quoted script, as in sh -c '...', holds its own arguments.
+		case strings.ContainsAny(value, " \t\n"):
 			value = Redact(value)
+		default:
+			value = assignmentPattern.ReplaceAllStringFunc(value, func(match string) string {
+				m := assignmentPattern.FindStringSubmatch(match)
+				if arg.reference(strings.Trim(m[4], `"'`)) {
+					return match
+				}
+				return m[1] + m[2] + m[3] + redacted
+			})
+			value = urlPattern.ReplaceAllStringFunc(value, RedactURL)
 		}
-		value = urlPattern.ReplaceAllStringFunc(value, RedactURL)
 		if value == arg.value {
 			continue
 		}
@@ -74,24 +92,18 @@ func Redact(line string) string {
 	return b.String()
 }
 
-func isReference(value string) bool { return strings.HasPrefix(value, "$") }
-
 type argument struct {
 	value      string
 	start, end int
-	// bare is set when no part of the argument was quoted or escaped.
-	bare bool
+	// literal is set when part of the argument was single-quoted, so the
+	// shell expands no variable in it.
+	literal bool
 }
 
-// credentialFlag reports whether the argument is a flag, or a name followed by
-// an empty assignment such as the "api_key": of a JSON object, whose value is
-// the next argument.
-func (a argument) credentialFlag() bool {
-	if flagPattern.MatchString(a.value) {
-		return true
-	}
-	m := assignmentPattern.FindStringSubmatch(a.value)
-	return m != nil && m[3] == ""
+// reference reports whether value is a variable reference rather than a
+// value: ${NAME}, or $NAME where the shell would expand it.
+func (a argument) reference(value string) bool {
+	return braced.MatchString(value) || (!a.literal && bare.MatchString(value))
 }
 
 // splitArgs splits a line into arguments with POSIX shell quoting: single
@@ -99,7 +111,7 @@ func (a argument) credentialFlag() bool {
 func splitArgs(line string) []argument {
 	var args []argument
 	var current strings.Builder
-	start, inArg, bare := 0, false, true
+	start, inArg, literal := 0, false, false
 	var quoteChar byte
 	for i := 0; i < len(line); i++ {
 		c := line[i]
@@ -115,6 +127,8 @@ func splitArgs(line string) []argument {
 			switch {
 			case c == '"':
 				quoteChar = 0
+			case c == '\\' && i+1 < len(line) && line[i+1] == '\n':
+				i++ // line continuation
 			case c == '\\' && i+1 < len(line) && strings.IndexByte("\"\\$`", line[i+1]) >= 0:
 				i++
 				current.WriteByte(line[i])
@@ -122,30 +136,34 @@ func splitArgs(line string) []argument {
 				current.WriteByte(c)
 			}
 			continue
+		case c == '\\' && i+1 < len(line) && line[i+1] == '\n':
+			i++ // line continuation
+			continue
 		case c == ' ' || c == '\t' || c == '\n':
 			if inArg {
-				args = append(args, argument{current.String(), start, i, bare})
+				args = append(args, argument{current.String(), start, i, literal})
 				current.Reset()
 				inArg = false
 			}
 			continue
 		}
 		if !inArg {
-			start, inArg, bare = i, true, true
+			start, inArg, literal = i, true, false
 		}
 		switch {
-		case c == '\'' || c == '"':
-			quoteChar, bare = c, false
+		case c == '\'':
+			quoteChar, literal = c, true
+		case c == '"':
+			quoteChar = c
 		case c == '\\' && i+1 < len(line):
 			i++
-			bare = false
 			current.WriteByte(line[i])
 		default:
 			current.WriteByte(c)
 		}
 	}
 	if inArg {
-		args = append(args, argument{current.String(), start, len(line), bare})
+		args = append(args, argument{current.String(), start, len(line), literal})
 	}
 	return args
 }
