@@ -9,7 +9,7 @@ import (
 const redacted = "REDACTED"
 
 const (
-	credentialName = `[A-Za-z0-9_-]*(?:authorization|token|secret|passw|api[-_]?key|cookie|credential|private[-_]?key)[A-Za-z0-9_-]*`
+	credentialName  = `[A-Za-z0-9_-]*(?:authorization|token|secret|passw|api[-_]?key|cookie|credential|private[-_]?key)[A-Za-z0-9_-]*`
 	credentialValue = `((?:bearer|basic)\s+)?("[^"]*"|'[^']*'|[^\s"'&;,]+)`
 )
 
