@@ -236,25 +236,34 @@ func runSecrets(args []string, home string, stdin io.Reader, stdout io.Writer) (
 		if err != nil {
 			return 0, fmt.Errorf("spec: %w", err)
 		}
-		values, err := secrets.Load(secretsPath, *f.identity)
-		if errors.Is(err, fs.ErrNotExist) && command == "set" && *create {
-			values, err = secrets.Values{}, nil
-		}
-		if errors.Is(err, fs.ErrNotExist) && command == "set" {
-			return 0, fmt.Errorf("%w; wait for it to sync, or pass --create for the fleet's first secret", err)
-		}
-		if err != nil {
-			return 0, err
-		}
-		switch command {
-		case "set":
-			value, err := readValue(stdin)
-			if err != nil {
+		// The value is read first, so the file is loaded, or found missing,
+		// just before it is written.
+		var value string
+		if command == "set" {
+			if value, err = readValue(stdin); err != nil {
 				return 0, err
 			}
 			if err := secrets.ValidateValue(name, value); err != nil {
 				return 0, err
 			}
+		}
+		_, statErr := os.Stat(secretsPath)
+		missing := errors.Is(statErr, fs.ErrNotExist)
+		var values secrets.Values
+		switch {
+		case missing && command == "set" && *create:
+			values = secrets.Values{}
+		case missing:
+			return 0, fmt.Errorf("%s does not exist; wait for it to sync, or pass --create to set for the fleet's first secret", shorten(secretsPath, home))
+		case command == "set" && *create:
+			return 0, fmt.Errorf("%s already exists; set without --create", shorten(secretsPath, home))
+		default:
+			if values, err = secrets.Load(secretsPath, *f.identity); err != nil {
+				return 0, err
+			}
+		}
+		switch command {
+		case "set":
 			values[name] = value
 		case "unset":
 			if _, ok := values[name]; !ok {

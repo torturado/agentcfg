@@ -239,12 +239,12 @@ func CodexServer(s Server) (CodexMCPServer, error) {
 		switch {
 		case len(refs) == 0:
 			c.HTTPHeaders = setKey(c.HTTPHeaders, header, value)
-		case len(refs) == 1 && refs[0][0] == value:
+		case len(refs) == 1 && value == "${"+refs[0][1]+"}":
 			c.EnvHTTPHeaders = setKey(c.EnvHTTPHeaders, header, refs[0][1])
-		case len(refs) == 1 && strings.EqualFold(header, "Authorization") && value == "Bearer "+refs[0][0]:
+		case len(refs) == 1 && strings.EqualFold(header, "Authorization") && value == "Bearer ${"+refs[0][1]+"}":
 			c.BearerTokenEnvVar = refs[0][1]
 		default:
-			return c, fmt.Errorf("header %s: Codex only supports a value that is exactly ${VAR}, or \"Bearer ${VAR}\" for Authorization", header)
+			return c, fmt.Errorf("header %s: Codex only supports a value that is exactly ${VAR}, or \"Bearer ${VAR}\" for Authorization, without a :- default", header)
 		}
 	}
 	for _, variable := range slices.Sorted(maps.Keys(s.Env)) {

@@ -39,6 +39,7 @@ type settings struct {
 	Env                        map[string]string          `json:"env"`
 	Hooks                      model.HookGroups           `json:"hooks"`
 	EnabledMcpjsonServers      []string                   `json:"enabledMcpjsonServers"`
+	DisabledMcpjsonServers     []string                   `json:"disabledMcpjsonServers"`
 	EnableAllProjectMcpServers bool                       `json:"enableAllProjectMcpServers"`
 	EnabledPlugins             map[string]json.RawMessage `json:"enabledPlugins"`
 }
@@ -107,7 +108,7 @@ func Inventory(home string) (model.Inventory, error) {
 	dropIns, _ := filepath.Glob(filepath.Join(managedDir, "managed-settings.d", "*.json"))
 	settingsPaths = append(settingsPaths, dropIns...)
 
-	var approved []string
+	var approved, rejected []string
 	approveAll := false
 	// Later files take precedence, so managed settings can turn a plugin off.
 	enabledPlugins := map[string]string{}
@@ -128,6 +129,7 @@ func Inventory(home string) (model.Inventory, error) {
 			})
 		}
 		approved = append(approved, s.EnabledMcpjsonServers...)
+		rejected = append(rejected, s.DisabledMcpjsonServers...)
 		approveAll = approveAll || s.EnableAllProjectMcpServers
 		for name, value := range s.EnabledPlugins {
 			if string(value) == "true" {
@@ -165,8 +167,11 @@ func Inventory(home string) (model.Inventory, error) {
 			inv.MCPServers = append(inv.MCPServers, servers(file.MCPServers, "managed", path, "mcpServers", nil)...)
 			continue
 		}
-		// A .mcp.json server only loads once approved in settings.
-		enabled := func(name string) bool { return approveAll || slices.Contains(approved, name) }
+		// A .mcp.json server only loads once approved in settings, and an
+		// explicit rejection wins over approving all of them.
+		enabled := func(name string) bool {
+			return !slices.Contains(rejected, name) && (approveAll || slices.Contains(approved, name))
+		}
 		inv.MCPServers = append(inv.MCPServers, servers(file.MCPServers, "project ~", path, "mcpServers", enabled)...)
 	}
 

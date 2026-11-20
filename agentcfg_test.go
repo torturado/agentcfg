@@ -453,7 +453,8 @@ func TestApplyCorrectsServersWhereTheyAreAndKeepsTheirOptions(t *testing.T) {
   "notes": { "type": "http", "url": "https://notes.example.com/mcp" },
   "unapproved": { "type": "http", "url": "https://unapproved.example.com/mcp" }
 } }`
-	settings := `{ "enabledMcpjsonServers": ["search", "deploy", "notes"] }`
+	// Approving all servers does not override an explicit rejection.
+	settings := `{ "enableAllProjectMcpServers": true, "disabledMcpjsonServers": ["unapproved"] }`
 	codex := strings.Replace(codexText(t, home), "[mcp_servers.search]\n", "[mcp_servers.search]\n# kept by hand\nstartup_timeout_sec = 30\n", 1)
 	for path, content := range map[string]string{".mcp.json": mcpJSON, ".claude/settings.json": settings, ".codex/config.toml": codex} {
 		if err := os.WriteFile(filepath.Join(home, path), []byte(content), 0o644); err != nil {
@@ -481,7 +482,7 @@ func TestApplyCorrectsServersWhereTheyAreAndKeepsTheirOptions(t *testing.T) {
 		t.Error("undeclared approved server left in ~/.mcp.json")
 	}
 	if _, found := file.MCPServers["unapproved"]; !found {
-		t.Error("unapproved server, which never loads, removed from ~/.mcp.json")
+		t.Error("rejected server, which never loads, removed from ~/.mcp.json")
 	}
 	if state, _ := os.ReadFile(filepath.Join(home, ".claude.json")); strings.Contains(string(state), "search") {
 		t.Errorf("search duplicated in ~/.claude.json:\n%s", state)
@@ -507,7 +508,8 @@ func TestReportsDoNotCarryCredentials(t *testing.T) {
 	home := copyHome(t, "clean")
 	settings := `{
   "enabledMcpjsonServers": ["search", "deploy"],
-  "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "curl -H 'Authorization: Bearer hook-secret-1234' https://hooks.example.com/stop?token=hook-secret-5678" }] }] }
+  "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "curl -H 'Authorization: Bearer hook-secret-1234' https://hooks.example.com/stop?token=hook-secret-5678" },
+    { "type": "command", "command": "notify --token \"hook-secret-quoted\" && echo token api_key=hook-secret-after-prose" }] }] }
 }`
 	mcpJSON := strings.Replace(readFile(t, filepath.Join(home, ".mcp.json")), "https://search.example.com/mcp", "https://search.example.com/mcp?key=url-secret-1234", 1)
 	for path, content := range map[string]string{".claude/settings.json": settings, ".mcp.json": mcpJSON} {

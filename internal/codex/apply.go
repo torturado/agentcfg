@@ -537,11 +537,13 @@ func setOrDelete(m map[string]any, key string, value any) {
 	}
 }
 
-// normalize makes decoded documents comparable: empty tables equal missing
-// ones, and every value has the type a JSON round trip gives it.
+// normalize makes decoded documents comparable: an empty mcp_servers or
+// hooks table equals a missing one, and every value has the type a JSON round
+// trip gives it. Other empty tables still count, so a rewrite that swallows
+// one is caught.
 func normalize(doc map[string]any) any {
-	for key, value := range doc {
-		if v, ok := value.(map[string]any); ok && len(v) == 0 {
+	for _, key := range []string{"mcp_servers", "hooks"} {
+		if v, ok := doc[key].(map[string]any); ok && len(v) == 0 {
 			delete(doc, key)
 		}
 	}
